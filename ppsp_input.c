@@ -5,28 +5,34 @@
 #include <string.h>
 #include <stdio.h>
 #include <unistd.h>
+#include <stdlib.h>
 
 #ifndef __LINUX__
 #include <windows.h>
 #else
-# include "../main/winlnxdefs.h"
+# include "winlnxdefs.h"
 #endif
 
 #include "Input_1.1.h"
 
 #include "controller.h"
 #include "map.h"
+#include "config.h"
 
 extern char pluginName[];
 extern char configdir[PATH_MAX];
 
 char pluginName[] = "PPSP Input 2";
+
 char configdir[PATH_MAX] = {0};
 
 void startup() {
-  printf("Starting up input driver!\n");
+  printf("[ppsp_input]: Starting up input driver!\n");
   hardware_controllerInitialize();
   usleep(1000*1000);
+  config_read();
+  system("echo absolute > /proc/pandora/nub0/mode");
+  system("echo absolute > /proc/pandora/nub1/mode");
 }
 
 #ifndef __LINUX__
@@ -58,24 +64,48 @@ EXPORT void CALL GetDllInfo ( PLUGIN_INFO * PluginInfo )
 
 EXPORT void CALL InitiateControllers (CONTROL_INFO ControlInfo)
 {
-    ControlInfo.Controls[0].Present = TRUE;
-    ControlInfo.Controls[0].RawData = FALSE;
-    ControlInfo.Controls[1].Present = FALSE;
-    ControlInfo.Controls[2].Present = FALSE;
-    ControlInfo.Controls[3].Present = FALSE;
-    printf("Init. Controllers!\n");
+	ControlInfo.Controls[0].Present = TRUE;
+	ControlInfo.Controls[0].RawData = FALSE;
+	ControlInfo.Controls[0].Plugin = PLUGIN_MEMPAK;
+	for(int i=1; i<4; i++)
+	{	
+		ControlInfo.Controls[i].Present = FALSE;
+		ControlInfo.Controls[i].RawData = FALSE;
+		ControlInfo.Controls[i].Plugin = PLUGIN_NONE;
+	}
+
+    printf("[ppsp_input]: Init. Controllers!\n");
     startup();
-    usleep(1000*500);
+    //usleep(1000*500);
 }
 
 EXPORT void CALL GetKeys(int Control, BUTTONS * Keys )
 {
-  hardware_controllerRefresh();
-  Keys->Value = 0x00000000;
-  for(int i = 0; i < N64_TRASH; i++) {
-    Keys->Value |= hardware_controllerGetButton(i)?(1 << i):0;
-  }
-  Keys->Value &= 0x0000FFFF; //Might have set a bit too much
-  pandoraToN64Analog(&Keys->Value);
+	hardware_controllerRefresh();
+	pandoraToN64Digital();
+	Keys->Value = 0x00000000;
+	for(int i = 0; i < N64_TRASH; i++) {
+		Keys->Value |= hardware_controllerGetButton(i)?(1 << i):0;
+	}
+	Keys->Value &= 0x0000FFFF; //Might have set a bit too much
+	pandoraToN64Analog(&Keys->Value);
 }
 
+EXPORT void CALL SetConfigDir( char *configDir )
+{
+	strcpy(configdir, configDir);
+}
+
+EXPORT void CALL DllConfig ( HWND hParent )
+{
+    FILE *f = fopen("./config/ppsp_input.conf", "r" );
+    if (!f)
+	{
+		config_setDefault();
+		config_write("./config/ppsp_input.conf");
+    }
+	else
+        fclose(f);
+
+    system("mousepad ./config/ppsp_input.conf");
+}

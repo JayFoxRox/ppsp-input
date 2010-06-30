@@ -3,8 +3,8 @@
 //Controlled by function-access
 
 #include "controller.h"
-
 #include "map.h"
+#include "config.h"
 
 #include <fcntl.h>
 #include <sys/ioctl.h>
@@ -21,11 +21,14 @@
 #define NAME_LENGTH 128
 #define PATH_LENGTH 512
 
-int analogHandle[2];
-int buttonsHandle;
+bool 	keys[512];
+
+int 	analogHandle[2];
+int 	buttonsHandle;
+int 	keyboardHandle;
 
 bool pandora;
-bool pandoraButton[N64_TRASH+1]; //TODO: Change name to n64Buttons as the current name is "wrong"
+bool pandoraButton[N64_TRASH+1];
 int16_t pandoraAxis[4];
 
 bool readEvent(int handle,struct input_event* event) {
@@ -92,35 +95,62 @@ bool hardware_controllerGetButton(uint8_t index) {
   return pandoraButton[index];
 }
 
+//
+int hardware_controllerAnalogCalib(int value, int analog) 
+{
+	float *c = ((analog == 0) ? config.calibLeft : config.calibRight);
+	float v = ((float)abs(value))/127;
+	float r;
+	
+	r = c[3];
+	for(int i=2; i>=0; i--)
+	{
+		r = r*v + c[i];
+	}
+	r = r*v;	
+
+	if (r>1) r=1;
+	if (value<0) r = -r;
+	return (int)(r*127);
+}
+
 void hardware_controllerRefresh() {
   if (pandora == false) { return; }
+  //for(int i=0;i<256;i++) keys[i] = false;
   struct input_event event;
   while(readEvent(analogHandle[0],&event)) {
     if(event.type == EV_ABS) {
-      if (event.code == ABS_X) { pandoraAxis[PANDORA_X_LEFT] = event.value; }
-      if (event.code == ABS_Y) { pandoraAxis[PANDORA_Y_LEFT] = event.value; }
+	  int v = hardware_controllerAnalogCalib(event.value/2, 0);
+      if (event.code == ABS_X) {pandoraAxis[PANDORA_X_LEFT] = v;}
+      if (event.code == ABS_Y) {pandoraAxis[PANDORA_Y_LEFT] = v;}
     }
-  }
+  }  
   while(readEvent(analogHandle[1],&event)) {
     if(event.type == EV_ABS) {
-      if (event.code == ABS_X) { pandoraAxis[PANDORA_X_RIGHT] = event.value; }
-      if (event.code == ABS_Y) { pandoraAxis[PANDORA_Y_RIGHT] = event.value; }
+	  int v = hardware_controllerAnalogCalib(event.value/2, 1);
+      if (event.code == ABS_X) { pandoraAxis[PANDORA_X_RIGHT] = v; }
+      if (event.code == ABS_Y) { pandoraAxis[PANDORA_Y_RIGHT] = v; }
     }
   }
   while(readEvent(buttonsHandle,&event)) {
     if(event.type == EV_KEY) {
-      pandoraButton[pandoraToN64Digital(event.code)] = event.value;
+      keys[event.code] = event.value;
+	}
+  }
+  while(readEvent(keyboardHandle,&event)) {
+    if(event.type == EV_KEY) {
+      keys[event.code] = event.value;
     }
   }
 }
 
 void hardware_controllerInitialize() {
   uint8_t analog[2];
-  analog[0] = searchEvent("vsense66");
-  analog[1] = searchEvent("vsense67");
+  analog[0] = searchEvent("nub0");
+  analog[1] = searchEvent("nub1");
   uint8_t buttons = searchEvent("gpio-keys");
-  uint8_t keyboard = searchEvent("omap_twl4030keypad");
-  uint8_t touchscreen = searchEvent("ADS784x");
+  uint8_t keyboard = searchEvent("keypad");
+  uint8_t touchscreen = searchEvent("touchscreen");
 
   if ((analog[0] | analog[1] | buttons) & 0x80) { //TODO: In final version check for keyboard | touchscreen too?
     pandora = false;
@@ -132,6 +162,7 @@ void hardware_controllerInitialize() {
     analogHandle[0] = openEvent(analog[0]);
     analogHandle[1] = openEvent(analog[1]);
     buttonsHandle = openEvent(buttons);
+	keyboardHandle = openEvent(keyboard);
   }
-  usleep(1000*1000);
+  //usleep(1000*1000);
 }

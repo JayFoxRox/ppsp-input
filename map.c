@@ -1,48 +1,126 @@
 #include "map.h"
 #include "controller.h"
+#include "stdio.h"
+#include "math.h"
 
-bool pandoraInvertAxis(uint8_t index) {
-  //Invert axis if necessary
-  if (index == PANDORA_Y_LEFT) { return true; }
-  if (index == PANDORA_Y_RIGHT) { return true; }
-  return false;
+#include "config.h"
+#include <fcntl.h>
+#include <stdlib.h>
+#include <unistd.h>
+
+
+//Invert axis if necessary
+bool pandoraInvertAxis(uint8_t index) 
+{
+	return ((index == PANDORA_Y_LEFT) || (index == PANDORA_Y_RIGHT));
 }
 
-uint16_t pandoraToN64Digital(uint8_t index) {
-  //Anything to do with digital only controls
-  //NOTE: Highest allowed return value is 13
+extern bool keys[256];
+extern bool pandoraButton[N64_TRASH+1];
+extern int16_t pandoraAxis[4];
 
-  if (index == PANDORA_RIGHT) { return N64_RIGHT; }
-  if (index == PANDORA_LEFT) { return N64_LEFT; }
-  if (index == PANDORA_DOWN) { return N64_DOWN; }
-  if (index == PANDORA_UP) { return N64_UP; }
-  if (index == PANDORA_START) { return N64_START; }
-  if (index == PANDORA_X) { return N64_Z; }
-  if (index == PANDORA_B) { return N64_B; }
-  if (index == PANDORA_A) { return N64_A; }
-/*
-  //Mapped to analog device below..
-  if (index == 0) { return N64_C_RIGHT; }
-  if (index == 0) { return N64_C_LEFT; }
-  if (index == 0) { return N64_C_DOWN; }
-  if (index == 0) { return N64_C_UP; }
-*/
-  if (index == PANDORA_L) { return N64_L; }
-  if (index == PANDORA_R) { return N64_R; }
-  return N64_TRASH;
+//Anything to do with digital only controls
+void pandoraToN64Digital() 
+{
+	if (keys[config.exitMap.mapping])
+	{
+		system("killall -9 mupen64plus");
+	}
+
+	for(int i=0; i<N64_TRASH;i++)
+	{
+		ButtonMap *bm = &config.buttonMap[i];
+		if (bm->type == BUTTON || bm->type == KBOARD)
+			pandoraButton[i] = keys[bm->mapping];
+		else if (bm->type == ANALOG)
+		{
+			switch(bm->mapping)
+			{
+				case ANALOG_LEFT_UP: 
+					pandoraButton[i] = (pandoraAxis[PANDORA_Y_LEFT] < -bm->threshold);
+					break;
+				case ANALOG_LEFT_DOWN: 
+					pandoraButton[i] = (pandoraAxis[PANDORA_Y_LEFT] > bm->threshold);
+					break;
+				case ANALOG_LEFT_LEFT: 
+					pandoraButton[i] = (pandoraAxis[PANDORA_X_LEFT] < -bm->threshold);
+					break;
+				case ANALOG_LEFT_RIGHT: 
+					pandoraButton[i] = (pandoraAxis[PANDORA_X_LEFT] > bm->threshold);
+					break;
+				case ANALOG_RIGHT_UP: 
+					pandoraButton[i] = (pandoraAxis[PANDORA_Y_RIGHT] < -bm->threshold);
+					break;
+				case ANALOG_RIGHT_DOWN: 
+					pandoraButton[i] = (pandoraAxis[PANDORA_Y_RIGHT] > bm->threshold);
+					break;
+				case ANALOG_RIGHT_LEFT: 
+					pandoraButton[i] = (pandoraAxis[PANDORA_X_RIGHT] < -bm->threshold);
+					break;
+				case ANALOG_RIGHT_RIGHT: 
+					pandoraButton[i] = (pandoraAxis[PANDORA_X_RIGHT] > bm->threshold);
+					break;
+
+			}
+		}
+	}
 }
 
-void pandoraToN64Analog(DWORD* buffer) {
-  //Anything to do with analog controls (or raw buffer access)
+//Anything to do with analog controls (or raw buffer access)
+void pandoraToN64Analog(DWORD* buffer) 
+{
+	static float analogx=0.0f, analogy=0.0f;
+	switch(config.analogMap.mapping)
+	{
+		case 0:
+		{
+			int8_t realx, realy;
+			realx = pandoraAxis[PANDORA_X_LEFT];
+			realy = -pandoraAxis[PANDORA_Y_LEFT]; 
+			*buffer |= *(uint8_t*)&realx << (16+8*N64_X);	
+			*buffer |= *(uint8_t*)&realy << (16+8*N64_Y);
+			break;
+		}	
 
-  *buffer |= (hardware_controllerGetAxis(PANDORA_X_RIGHT)<0x3F)?(1 << N64_C_LEFT):0;
-  *buffer |= (hardware_controllerGetAxis(PANDORA_X_RIGHT)>0xC0)?(1 << N64_C_RIGHT):0;
-  *buffer |= (hardware_controllerGetAxis(PANDORA_Y_RIGHT)<0x3F)?(1 << N64_C_UP):0;
-  *buffer |= (hardware_controllerGetAxis(PANDORA_Y_RIGHT)>0xC0)?(1 << N64_C_DOWN):0;
-
-  int8_t real = hardware_controllerGetAxis(PANDORA_X_LEFT)-0x80;
-  *buffer |= *(uint8_t*)&real << (16+8*N64_X);
-
-  real = hardware_controllerGetAxis(PANDORA_Y_LEFT)-0x80; 
-  *buffer |= *(uint8_t*)&real << (16+8*N64_Y);
+		case 1:			
+		{
+			int8_t realx, realy;
+			realx = pandoraAxis[PANDORA_X_RIGHT];
+			realy = -pandoraAxis[PANDORA_Y_RIGHT]; 
+			*buffer |= *(uint8_t*)&realx << (16+8*N64_X);	
+			*buffer |= *(uint8_t*)&realy << (16+8*N64_Y);
+			break;
+		}
+	
+		case 2:
+		{
+			float xx = 0.0f, yy = 0.0f;
+			
+			if (keys[KEY_UP]) 		yy += config.analogMap.velocity;
+			if (keys[KEY_DOWN]) 	yy -= config.analogMap.velocity;
+			if (keys[KEY_RIGHT]) 	xx += config.analogMap.velocity;
+			if (keys[KEY_LEFT]) 	xx -= config.analogMap.velocity;
+			
+			if (analogx>0 && xx<0) analogx = 0.0f;
+			if (analogx<0 && xx>0) analogx = 0.0f;
+			if (analogy>0 && yy<0) analogy = 0.0f;
+			if (analogy<0 && yy>0) analogy = 0.0f;
+			if (xx == 0.0f) 		analogx = 0.0f;
+			if (yy == 0.0f) 		analogy = 0.0f;
+			
+			analogx += xx;
+			analogy += yy;
+			if (analogx > +127.0f) analogx = +127.0f;
+			else if (analogx < -127.0f) analogx = -127.0f;
+			if (analogy > +127.0f) analogy = +127.0f;
+			else if (analogy < -127.0f) analogy = -127.0f;
+				
+			int8_t real;
+			real = (int8_t) analogx;
+			*buffer |= *(uint8_t*)&real << (16+8*N64_X);
+			real = (int8_t) analogy;
+			*buffer |= *(uint8_t*)&real << (16+8*N64_Y);
+			break;
+		}
+	}
 }
