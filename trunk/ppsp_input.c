@@ -31,8 +31,6 @@ void startup() {
   hardware_controllerInitialize();
   usleep(1000*1000);
   config_read();
-  system("echo absolute > /proc/pandora/nub0/mode");
-  system("echo absolute > /proc/pandora/nub1/mode");
 }
 
 #ifndef __LINUX__
@@ -76,7 +74,7 @@ EXPORT void CALL InitiateControllers (CONTROL_INFO ControlInfo)
 
     printf("[ppsp_input]: Init. Controllers!\n");
     startup();
-    //usleep(1000*500);
+    usleep(1000*500);
 }
 
 EXPORT void CALL GetKeys(int Control, BUTTONS * Keys )
